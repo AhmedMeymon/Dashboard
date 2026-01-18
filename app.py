@@ -78,9 +78,33 @@ def main():
 
         # Mileage vs price aggregated line (binned)
         st.subheader("Average price by mileage bucket")
-        filtered["mileage_bucket"] = pd.cut(filtered["mileage"], bins=10)
-        price_by_mileage = filtered.groupby("mileage_bucket")["price"].median().dropna()
-        st.line_chart(price_by_mileage)
+        # Build an explicit DataFrame with numeric midpoints so Altair/Streamlit receive plain numeric types.
+        try:
+            mb = pd.cut(filtered["mileage"].dropna(), bins=10)
+            agg = (
+                filtered.dropna(subset=["mileage", "price"]).assign(mileage_bucket=mb)
+                .groupby("mileage_bucket", observed=True)["price"]
+                .median()
+                .reset_index()
+                .rename(columns={"price": "median_price"})
+            )
+
+            # Compute numeric midpoint for each interval
+            def mid(iv):
+                if pd.isna(iv):
+                    return np.nan
+                return (iv.left + iv.right) / 2
+
+            agg["mileage_mid"] = agg["mileage_bucket"].apply(mid)
+            agg = agg.dropna(subset=["mileage_mid", "median_price"]).sort_values("mileage_mid")
+
+            if not agg.empty:
+                chart_df = agg.set_index("mileage_mid")["median_price"]
+                st.line_chart(chart_df)
+            else:
+                st.info("Not enough data to build mileage buckets.")
+        except Exception as e:
+            st.error(f"Could not build mileage-by-price chart: {e}")
 
     else:
         st.info("No listings match the selected filters.")
